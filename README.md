@@ -1,40 +1,51 @@
 # Testing-Environment-Data-Generator
+
 Testing environment data generator for the LAB University EV Powertrain Digital Twin project. A Python tool generating realistic simulated EV data — battery, charging, powertrain, grid, and trip data — so other teams can build and test without needing real hardware.
 
-Group members
-1. Yeganeh maleki
+## Group members
+1. Yeganeh Maleki
 2. Madhusudan Regmi
 3. Md. Nihon Mostari Siam
 
+## What it does
+This app generates realistic fake EV data for six categories, so other groups in the project can build dashboards, models, and analytics before real hardware or real vehicle data is available:
+- Battery Sensor data
+- Charging Session data
+- Powertrain & Motor data
+- Grid & Energy data
+- Vehicle Trip data
+- Kempower Station Session data
 
--------------------------------------------------------------------------------------------------------------------------------------------------
+Data can be exported as CSV, JSON, SQL, or SQLite.
 
-l. Record Generation Limit — Capped at 1,000, Not Based on Actual Need
+## Requirements
+- Python 3.x
+- No extra installs needed beyond Python itself (the app uses Python's built-in libraries, including Tkinter for the interface)
+
+*(Double-check this against what's actually needed to run it on a fresh machine — fill in any missing packages here.)*
+
+## Getting started
+
+python emdt_test_data_generator.py
 
 
-- What we found
+## Current settings
+- Up to 10,000 records can be generated per run (raised from the original 1,000 limit)
+- Live statistics panel (min / mean / max) for generated data
+- Map view showing generated GPS points within Finland
+- Manual record entry, with auto-generated unique IDs
 
-While reviewing the tool’s settings, we found that record generation was hardcoded to a maximum of 1,000 records per run. This limit existed as a single fixed number in the app’s configuration, with no clear reasoning behind why 1,000 specifically was chosen — it wasn’t based on what other groups in the project actually need.
+## Known limitations
+- Charging energy doesn't always match the battery's actual charge change (around 40% of charging records are off by more than 20 kWh from what the battery's charge level implies)
+- Some trips (about 15%) require more energy than the largest available battery can actually hold
+- Random GPS points are chosen from a rectangle around Finland, so a small number can land outside Finland's real borders (sea, neighboring countries)
+- Using the same "seed" doesn't produce fully identical results on repeat runs — timestamps still use the current real time
+- Export and Delete buttons stay clickable while data is still generating in the background
+- Charging station and vehicle specification details are approximate and haven't been verified against official sources yet
+- No automated tests exist yet — all checking has been done manually
 
-- Why this mattered
-
-Our tool’s whole purpose is to supply test data for other groups — visualization, predictive modeling, and the wider powertrain/analytics group. If any of them needed a larger dataset (for example, to properly train or test a predictive model, which often benefits from more data), our cap would have blocked them before they even started, with no way around it except changing the code themselves.
-
-- What we did
-
-We raised the limit in the app’s configuration:
-
-python
-max_records: int = 10_000  # raised from 1,000 to support larger datasets
-
-This was a single-line change — the value controls both the UI’s input limit and the generation loop’s upper bound throughout the whole app, so nothing else needed to change alongside it.
-
-We tested it by actually generating 10,000 records multiple times. It worked every time, with no errors, in under a second.
-
-- Advantage
-
-Other groups are no longer blocked by an arbitrary limit that was never actually justified by real project needs. Raising this cap removed a real constraint on the rest of the project’s ability to build and test using our data.
-
-- Still open
-
-We haven’t yet confirmed with the dependent groups (visualization, predictive modeling, powertrain/analytics) what dataset sizes they actually expect to need. 10,000 was a reasonable jump from 1,000, but it was our own estimate, not a number agreed with them — worth checking before we call this fully settled.
+## Roadmap / Future ideas
+- Merge in the physics-based upgrade (speed, motor RPM, torque, and battery values calculated from real vehicle physics instead of random numbers) — this already exists in a separate version of the code and still needs to be combined and tested
+- Test the full app with a large dataset (10,000 records) to confirm the table, map, and all export formats handle it smoothly
+- Fix the known limitations listed above
+- Considering switching the map from a simplified outline to real map tiles (see "Considered" note in the backlog) — not started yet
