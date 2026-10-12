@@ -1,5 +1,5 @@
 """
-EMDT Test Data Generator — v2.1
+EMDT Test Data Generator — v2.5.0
 Electric Mobility Digital Twin
 LAB University of Applied Sciences — Yeganeh Maleki, 2026
 
@@ -39,6 +39,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 import queue
 import random
 import sqlite3
@@ -97,7 +98,7 @@ def configure_logging() -> None:
 class AppConfig:
     window_size: str = "1050x900"
     banner_size: tuple[int, int] = (1050, 200)
-    max_records: int = 1_000
+    max_records: int = 10_000               # was 1_000
     min_records: int = 1
     column_width: int = 130
     column_min_width: int = 80
@@ -394,6 +395,35 @@ MODELS = ("Model 3 Standard", "Model 3 Long Range", "Model 3 Performance")
 # Helpers
 # ---------------------------------------------------------------------------
 
+_ID_COUNTERS: dict[str, int] = {}
+
+
+def _reset_id_counters() -> None:
+    """Restart all sequential ID counters (called at the start of each Generate run)."""
+    _ID_COUNTERS.clear()
+
+
+def _next_id(prefix: str, width: int) -> str:
+    """Return a unique sequential ID such as CHG-0001, CHG-0002, ..."""
+    _ID_COUNTERS[prefix] = _ID_COUNTERS.get(prefix, 0) + 1
+    return f"{prefix}-{_ID_COUNTERS[prefix]:0{width}d}"
+
+
+def _next_unique_id(existing: list[Record], column: str, current: str) -> str:
+    """Return an ID shaped like *current* that is not used in *existing*.
+
+    e.g. current 'CHG-0042' -> 'CHG-<highest number in column>+1', same width.
+    """
+    prefix, _, number = current.rpartition("-")
+    width = len(number)
+    highest = 0
+    for rec in existing:
+        p, _, n = str(rec.get(column, "")).rpartition("-")
+        if p == prefix and n.isdigit():
+            highest = max(highest, int(n))
+    return f"{prefix}-{highest + 1:0{width}d}"
+
+
 def _vehicle_id() -> str:
     return f"EV-{random.randint(10_000, 999_999)}"
 
@@ -429,6 +459,17 @@ def _random_finland_gps() -> tuple[float, float]:
 # ---------------------------------------------------------------------------
 # Data generators
 # ---------------------------------------------------------------------------
+
+# Named charging locations with a known anchor point. None = "anywhere in
+# Finland" (a home charger or mall can be at any random place).
+_CHARGING_LOCATIONS: dict[str, tuple[float, float] | None] = {
+    "Lahti Supercharger":    (60.9827, 25.6612),
+    "Helsinki Supercharger": (60.1699, 24.9384),
+    "Home Charger":          None,
+    "Shopping Mall":         None,
+}
+_LOCATION_JITTER_DEG = 0.01   # ≈ ±1 km around a named location
+
 
 def generate_battery() -> Record:
     """Tesla Model 3 battery sensor snapshot."""
@@ -472,20 +513,23 @@ def generate_charging_session() -> Record:
     efficiency   = random.uniform(0.85, 1.0)
     duration_min = max(5, round(energy_kwh / (power_kw * efficiency) * 60))
 
-    lat, lon = _random_finland_gps()
+    location = random.choice(tuple(_CHARGING_LOCATIONS))
+    anchor   = _CHARGING_LOCATIONS[location]
+    if anchor is None:
+        lat, lon = _random_finland_gps()
+    else:
+        lat = round(anchor[0] + random.uniform(-_LOCATION_JITTER_DEG, _LOCATION_JITTER_DEG), 6)
+        lon = round(anchor[1] + random.uniform(-_LOCATION_JITTER_DEG, _LOCATION_JITTER_DEG), 6)
 
     return {
-        "session_id":   f"CHG-{random.randint(1_000, 9_999)}",
+        "session_id":   _next_id("CHG", 4),
         "vehicle_id":   _vehicle_id(),
         "timestamp":    _single_timestamp(),
         "model":        random.choice(MODELS),
         "latitude":     lat,
         "longitude":    lon,
         "charger_type": charger_type,
-        "location":     random.choice([
-            "Lahti Supercharger", "Helsinki Supercharger",
-            "Home Charger",       "Shopping Mall",
-        ]),
+        "location":     location,
         "start_soc":    start_soc,
         "end_soc":      end_soc,
         "energy_kwh":   energy_kwh,
@@ -550,6 +594,9 @@ def generate_trip() -> Record:
     """Tesla Model 3 trip telemetry with consistent energy and CO₂ figures."""
     distance = round(random.uniform(1.0, 600.0), 1)
     energy   = round(distance * random.uniform(0.12, 0.20), 2)
+    avg_speed = round(random.uniform(20.0, 130.0), 1)
+    # Duration follows from distance and average speed.
+    duration_min = max(1, round(distance / avg_speed * 60))
 
     # Start/end points are independent random draws within Finland — they
     # are NOT guaranteed to be exactly `distance_km` apart. Good enough for
@@ -558,7 +605,7 @@ def generate_trip() -> Record:
     end_lat, end_lon     = _random_finland_gps()
 
     return {
-        "trip_id":         f"TRIP-{random.randint(1_000, 9_999)}",
+        "trip_id":         _next_id("TRIP", 4),
         "vehicle_id":      _vehicle_id(),
         "timestamp":       _single_timestamp(),
         "vehicle_type":    random.choice(["Passenger Car", "Van", "Bus", "Cargo"]),
@@ -567,8 +614,8 @@ def generate_trip() -> Record:
         "end_latitude":    end_lat,
         "end_longitude":   end_lon,
         "distance_km":     distance,
-        "duration_min":    random.randint(5, 300),
-        "avg_speed_kmh":   round(random.uniform(20.0, 130.0), 1),
+        "duration_min":    duration_min,
+        "avg_speed_kmh":   avg_speed,
         "energy_kwh":      energy,
         "regen_kwh":       round(energy * random.uniform(0.05, 0.25), 2),
         "co2_saved_kg":    round(distance * 0.12, 3),   # ICEV baseline: 120 g CO₂/km
@@ -605,7 +652,7 @@ def generate_kempower_session() -> Record:
     lon    = round(station.longitude + random.uniform(-jitter, jitter), 6)
 
     return {
-        "session_id":      f"KMP-{random.randint(10_000, 99_999)}",
+        "session_id":      _next_id("KMP", 5),
         "timestamp":       _single_timestamp(),
         "station_name":    station.name,
         "network":         station.network,
@@ -717,9 +764,12 @@ def parse_field_value(raw: str, original: object) -> object:
             raise FieldParseError(f"must be a whole number (got '{value}')") from None
     if isinstance(original, float):
         try:
-            return float(value)
+            number = float(value)
         except ValueError:
             raise FieldParseError(f"must be a number (got '{value}')") from None
+        if not math.isfinite(number):
+            raise FieldParseError(f"must be a finite number (got '{value}')")
+        return number
     # Unknown/string type — this covers the enum fields (status, route,
     # drive_mode, ...). Keep it as plain text; do NOT try to coerce it to
     # int/float here, or a value like "123" typed into "status" would
@@ -777,7 +827,7 @@ def build_sql_script(table: str, records: list[Record], columns: tuple[str, ...]
     col_defs   = ",\n    ".join(f"{c} {col_types[c]}" for c in columns)
     col_list   = ", ".join(columns)
     lines = [
-        "-- EMDT Test Data Generator v2",
+        f"-- EMDT Test Data Generator v{__version__}",
         f"-- Table: {table}  |  Records: {len(records)}",
         "",
         f"CREATE TABLE IF NOT EXISTS {table} (",
@@ -812,6 +862,15 @@ def write_sqlite_db(
 # ---------------------------------------------------------------------------
 # Statistics panel
 # ---------------------------------------------------------------------------
+
+def _fmt_stat(value: float) -> str:
+    """Compact, human-readable number for the statistics panel."""
+    if abs(value) >= 1000:
+        return f"{value:,.0f}"
+    if abs(value) >= 100:
+        return f"{value:.1f}"
+    return f"{value:.2f}".rstrip("0").rstrip(".") or "0"
+
 
 class StatsPanel:
     """
@@ -884,7 +943,7 @@ class StatsPanel:
                      font=t.font_small_bold).pack()
             tk.Label(
                 cell,
-                text=f"min {mn:.2g}  mean {mean:.2g}  max {mx:.2g}",
+                text=f"min {_fmt_stat(mn)}  mean {_fmt_stat(mean)}  max {_fmt_stat(mx)}",
                 bg=t.card, fg=t.stats_label, font=t.font_small,
             ).pack()
 
@@ -1252,7 +1311,7 @@ class MapPanel:
             self.canvas.create_line(gx, pad, gx, h - pad, fill=t.border, dash=(2, 3))
             self.canvas.create_line(pad, gy, w - pad, gy, fill=t.border, dash=(2, 3))
 
-        # --- clip drawing to the plot area so pan/zoom can't paint over the UI ---
+        # --- background band above the plot frame (cosmetic only) ---
         self.canvas.create_rectangle(
             0, 0, w, pad, fill=t.card, outline="", tags="chrome"
         )
@@ -1276,9 +1335,14 @@ class MapPanel:
                     x + 6, y, anchor="w", fill=t.muted, font=("Consolas", 8), text=name
                 )
 
+        # For big datasets (e.g. 10,000 records) draw at most ~2000 points
+        # so pan/zoom stays smooth. Only the map is sampled — the table,
+        # stats and all exports still use every record.
+        draw_records = self._records[::max(1, len(self._records) // 2000)]
+
         # --- data points ---
         if self._mode == "point":
-            for rec in self._records:
+            for rec in draw_records:
                 x, y = self._project(rec["latitude"], rec["longitude"])
                 color = t.accent
                 if self._category_field:
@@ -1290,7 +1354,7 @@ class MapPanel:
                 self._plotted.append((x, y, rec["latitude"], rec["longitude"]))
             legend = f"{len(self._records)} point(s)"
         else:
-            for rec in self._records:
+            for rec in draw_records:
                 sx, sy = self._project(rec["start_latitude"], rec["start_longitude"])
                 ex, ey = self._project(rec["end_latitude"], rec["end_longitude"])
                 self.canvas.create_line(sx, sy, ex, ey, fill=t.muted, width=1)
@@ -1434,7 +1498,6 @@ class MapPanel:
         t = self.theme
         self.canvas.delete("tooltip")
         w, h = self._canvas_size()
-        pad_x = 8
         text_w = 7 * len(text) + 14  # rough monospace width estimate
         box_x = min(x + 12, w - text_w - 4)
         box_y = max(y - 24, 2)
@@ -1864,6 +1927,7 @@ class EMDTApp:
         """Runs on a background thread. MUST NOT touch any tkinter widget."""
         try:
             random.seed(seed_value) if seed_value is not None else random.seed()
+            _reset_id_counters()
 
             timestamps = _make_timestamps(count, interval)
             records: list[Record] = []
@@ -2119,7 +2183,7 @@ class EMDTApp:
 # ---------------------------------------------------------------------------
 
 class ManualEntryDialog:
-    """Modal form for adding a single record by hand."""
+    """Non-modal form for adding a single record by hand."""
 
     _W, _H = 440, 560
 
@@ -2138,7 +2202,11 @@ class ManualEntryDialog:
         if (app.active_spec and app.active_spec.label == spec.label
                 and app.generated_data):
             self.base_row = app.generated_data[-1].copy()
-            help_text     = "Previous row values loaded. Edit as needed."
+            for id_col in ("session_id", "trip_id"):
+                if id_col in self.base_row:
+                    self.base_row[id_col] = _next_unique_id(
+                        app.generated_data, id_col, str(self.base_row[id_col]))
+            help_text     = "Previous row values loaded (ID auto-incremented). Edit as needed."
         else:
             self.base_row = normalize_record(spec.generator(), spec.columns)
             help_text     = "Sample values loaded. Edit as needed."
