@@ -22,7 +22,6 @@ Data can be exported as CSV, JSON, SQL, or SQLite.
 - Python 3.x
 - No extra installs needed beyond Python itself (the app uses Python's built-in libraries, including Tkinter for the interface)
 
-*(Double-check this against what's actually needed to run it on a fresh machine — fill in any missing packages here.)*
 
 ## Getting started
 
