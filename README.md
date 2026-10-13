@@ -5,7 +5,6 @@ Testing environment data generator for the LAB University EV Powertrain Digital 
 ## Group members
 1. Yeganeh Maleki
 2. Madhusudan Regmi
-3. Md. Nihon Mostari Siam
 
 ## What it does
 This app generates realistic fake EV data for six categories, so other groups in the project can build dashboards, models, and analytics before real hardware or real vehicle data is available:
