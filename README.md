@@ -184,4 +184,4 @@ Build automated tests that check these things on their own.
 The current GPS map is a simplified, hand-drawn outline of Finland — functional, but not visually polished.
 
 **What we're considering**
-Switching to a real map (like Google Maps) for a more professional look during demos. Decided to 
+Switching to a real map (like Google Maps) for a more professional look during demos. Decided to hold off for now — it would require internet and an API key, breaking the app's current offline capability, plus real engineering work to embed in our framework. Nothing has been built yet, this is still just research.
