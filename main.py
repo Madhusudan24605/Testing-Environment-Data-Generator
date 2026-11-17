@@ -388,7 +388,16 @@ KEMPOWER_STATIONS: tuple[KempowerStation, ...] = (
 Record = dict[str, Any]
 GeneratorFunc = Callable[[], Record]
 
-MODELS = ("Model 3 Standard", "Model 3 Long Range", "Model 3 Performance")
+MODELS = ("Polestar 4 Rear Motor", "Polestar 4 Dual Motor", "Polestar 4 Dual Motor Performance")
+
+# Polestar 4 specifications (source: polestar.com Polestar 4 SUV specifications page).
+# The page lists one battery figure (100 kWh) for all variants.
+BATTERY_CAPACITY_KWH = 100
+MAX_SPEED_KMH = 200.0        # top speed, all variants
+MAX_TORQUE_NM = 686.0        # Dual motor (Rear motor: 343 Nm)
+MAX_DC_CHARGE_KW = 200       # max DC charging, all variants
+AC_CHARGE_KW = 11            # standard AC charging (22 kW optional)
+CONSUMPTION_KWH_PER_KM = (0.178, 0.216)   # WLTP 17.8 - 21.6 kWh/100 km
 
 
 # ---------------------------------------------------------------------------
@@ -463,8 +472,8 @@ def _random_finland_gps() -> tuple[float, float]:
 # Named charging locations with a known anchor point. None = "anywhere in
 # Finland" (a home charger or mall can be at any random place).
 _CHARGING_LOCATIONS: dict[str, tuple[float, float] | None] = {
-    "Lahti Supercharger":    (60.9827, 25.6612),
-    "Helsinki Supercharger": (60.1699, 24.9384),
+    "Lahti Fast Charger":    (60.9827, 25.6612),
+    "Helsinki Fast Charger": (60.1699, 24.9384),
     "Home Charger":          None,
     "Shopping Mall":         None,
 }
@@ -472,8 +481,18 @@ _LOCATION_JITTER_DEG = 0.01   # ≈ ±1 km around a named location
 
 
 def generate_battery() -> Record:
-    """Tesla Model 3 battery sensor snapshot."""
+    """Polestar 4 battery sensor snapshot."""
     lat, lon = _random_finland_gps()
+
+    # Current direction follows the vehicle state (negative = into the battery).
+    status = random.choice(["Charging", "Driving", "Idle", "Standby"])
+    if status == "Charging":
+        current = round(random.uniform(-200.0, -5.0), 1)
+    elif status == "Driving":
+        current = round(random.uniform(5.0, 200.0), 1)
+    else:
+        current = round(random.uniform(-2.0, 2.0), 1)
+
     return {
         "vehicle_id":     _vehicle_id(),
         "timestamp":      _single_timestamp(),
@@ -482,18 +501,18 @@ def generate_battery() -> Record:
         "longitude":      lon,
         "soc_percent":    round(random.uniform(20.0, 80.0), 1),
         "voltage_v":      round(random.uniform(340.0, 400.0), 1),
-        "current_a":      round(random.uniform(-200.0, 200.0), 1),
-        "capacity_kwh":   random.choice([50, 62, 75, 82]),
+        "current_a":      current,
+        "capacity_kwh":   BATTERY_CAPACITY_KWH,
         "temperature_c":  round(random.uniform(-10.0, 45.0), 1),
         "health_percent": round(random.uniform(70.0, 100.0), 1),
         "charge_cycles":  random.randint(0, 1_200),
-        "status":         random.choice(["Charging", "Driving", "Idle", "Standby"]),
+        "status":         status,
     }
 
 
 def generate_charging_session() -> Record:
     """
-    Tesla Model 3 DC/AC charging session.
+    Polestar 4 DC/AC charging session.
 
     Duration is derived from energy and charger power so that
     the three fields are mutually consistent instead of independent
@@ -501,12 +520,15 @@ def generate_charging_session() -> Record:
     """
     start_soc    = round(random.uniform(10.0, 40.0), 1)
     end_soc      = round(random.uniform(max(start_soc + 5.0, 60.0), 90.0), 1)
-    energy_kwh   = round(random.uniform(10.0, 75.0), 1)
+    # Energy follows from the SOC change and the battery size, so the
+    # SOC / energy / duration / cost fields all agree with each other.
+    capacity_kwh = BATTERY_CAPACITY_KWH
+    energy_kwh   = round((end_soc - start_soc) / 100 * capacity_kwh, 1)
 
     charger_type, power_kw = random.choice([
-        ("AC Level 2 - 11kW",         11),
-        ("DC Supercharger V2 - 150kW", 150),
-        ("DC Supercharger V3 - 250kW", 250),
+        ("AC - 11kW",       AC_CHARGE_KW),
+        ("DC Fast - 150kW", 150),
+        ("DC Fast - 200kW", MAX_DC_CHARGE_KW),
     ])
 
     # Realistic duration: energy / power, with ±15 % efficiency jitter.
@@ -540,7 +562,7 @@ def generate_charging_session() -> Record:
 
 
 def generate_powertrain() -> Record:
-    """Tesla Model 3 powertrain and motor telemetry."""
+    """Polestar 4 powertrain and motor telemetry."""
     lat, lon = _random_finland_gps()
     return {
         "vehicle_id":      _vehicle_id(),
@@ -548,9 +570,9 @@ def generate_powertrain() -> Record:
         "model":           random.choice(MODELS),
         "latitude":        lat,
         "longitude":       lon,
-        "speed_kmh":       round(random.uniform(0.0, 261.0), 1),
+        "speed_kmh":       round(random.uniform(0.0, MAX_SPEED_KMH), 1),
         "motor_rpm":       random.randint(0, 19_000),
-        "torque_nm":       round(random.uniform(0.0, 493.0), 1),
+        "torque_nm":       round(random.uniform(0.0, MAX_TORQUE_NM), 1),
         "motor_temp_c":    round(random.uniform(20.0, 120.0), 1),
         "inverter_temp_c": round(random.uniform(20.0, 90.0), 1),
         "efficiency_pct":  round(random.uniform(75.0, 98.0), 1),
@@ -591,9 +613,9 @@ def generate_grid() -> Record:
 
 
 def generate_trip() -> Record:
-    """Tesla Model 3 trip telemetry with consistent energy and CO₂ figures."""
+    """Polestar 4 trip telemetry with consistent energy and CO₂ figures."""
     distance = round(random.uniform(1.0, 600.0), 1)
-    energy   = round(distance * random.uniform(0.12, 0.20), 2)
+    energy   = round(distance * random.uniform(*CONSUMPTION_KWH_PER_KM), 2)
     avg_speed = round(random.uniform(20.0, 130.0), 1)
     # Duration follows from distance and average speed.
     duration_min = max(1, round(distance / avg_speed * 60))
@@ -637,7 +659,9 @@ def generate_kempower_session() -> Record:
     station  = random.choice(KEMPOWER_STATIONS)
     start_soc = round(random.uniform(10.0, 40.0), 1)
     end_soc   = round(random.uniform(max(start_soc + 5.0, 50.0), 90.0), 1)
-    energy    = round(random.uniform(10.0, 75.0), 1)
+    # Energy follows from the SOC change and the battery size.
+    capacity_kwh = BATTERY_CAPACITY_KWH
+    energy    = round((end_soc - start_soc) / 100 * capacity_kwh, 1)
 
     # Use real station ceiling — no artificial 400 kW cap.
     actual_power = round(
